@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
@@ -136,3 +137,55 @@ if st.button("🔍 Predict Churn"):
     col1.metric("Tenure", f"{tenure} months")
     col2.metric("Monthly Charges", f"${monthly_charges}")
     col3.metric("Contract", contract)
+
+# ── Model Metrics ──────────────────────────────────────────
+st.markdown("---")
+st.subheader("📈 Model Performance")
+
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+@st.cache_resource
+def get_metrics():
+    df = pd.read_csv('WA_Fn-UseC_-Telco-Customer-Churn.csv')
+    df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce').fillna(0)
+    df = df.drop('customerID', axis=1)
+    binary_cols = ['gender','Partner','Dependents','PhoneService','PaperlessBilling','Churn']
+    for col in binary_cols:
+        df[col] = df[col].map({'Yes':1,'No':0,'Male':1,'Female':0})
+    df = pd.get_dummies(df, columns=['MultipleLines','InternetService','OnlineSecurity',
+                                      'OnlineBackup','DeviceProtection','TechSupport',
+                                      'StreamingTV','StreamingMovies','Contract','PaymentMethod'])
+    X = df.drop('Churn', axis=1)
+    y = df['Churn']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    scaler = StandardScaler()
+    scale_cols = ['tenure','MonthlyCharges','TotalCharges']
+    X_train[scale_cols] = scaler.fit_transform(X_train[scale_cols])
+    X_test[scale_cols] = scaler.transform(X_test[scale_cols])
+    model = XGBClassifier(n_estimators=200, max_depth=4, learning_rate=0.05,
+                          subsample=0.8, colsample_bytree=0.8, scale_pos_weight=3,
+                          random_state=42, eval_metric='logloss')
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    importances = pd.Series(model.feature_importances_, index=X.columns)
+    return accuracy_score(y_test, y_pred), precision_score(y_test, y_pred), recall_score(y_test, y_pred), f1_score(y_test, y_pred), importances
+
+acc, prec, rec, f1, importances = get_metrics()
+
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("✅ Accuracy",  f"{acc*100:.1f}%")
+m2.metric("🎯 Precision", f"{prec*100:.1f}%")
+m3.metric("🔍 Recall",    f"{rec*100:.1f}%")
+m4.metric("⚖️ F1 Score",  f"{f1*100:.1f}%")
+
+# ── Feature Importance Chart ───────────────────────────────
+st.markdown("---")
+st.subheader("🔑 Top 15 Features Driving Churn")
+
+top15 = importances.nlargest(15).sort_values()
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.barh(top15.index, top15.values, color='steelblue')
+ax.set_xlabel("Importance Score")
+ax.set_title("Feature Importance (XGBoost)")
+plt.tight_layout()
+st.pyplot(fig)
